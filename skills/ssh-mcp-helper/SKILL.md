@@ -86,13 +86,18 @@ digraph ssh_mcp_helper {
 5. 传输模式：默认 `exec`；若用户标记目标为堡垒机/跳板机，改 `shell` 并追问 `--shell-ready-timeout`
 6. 路径白名单：是 → 追问 `--allowed-local-paths` / `--allowed-remote-paths`
 7. 启动时预连接：是 → 追加 `--pre-connect`
+8. MCP 接入方式：默认 `stdio`（客户端拉起进程）。若选 HTTP：
+   - 启动命令追加 `--mcp-transport http`，并建议设置 `SSH_MCP_HTTP_TOKEN`（或 `--http-token`）
+   - 客户端配置使用 `url` 与可选的 `headers.Authorization`，形式为 `Bearer <token>`
+   - 提醒用户先单独启动 ssh-mcp-server 进程，再让客户端连接该 URL
+   - 默认只监听 `127.0.0.1:3000`，路径 `/mcp`；监听非本机地址时启动日志会警告，应同时配置令牌
 
 ### Step 6：生成 JSON 片段
 装配规则：
-- `command` 固定为 `"npx"`
-- `args` 第一项 `"-y"`，第二项 `"@fangjunjie/ssh-mcp-server"`
+- stdio：`command` 固定为 `"npx"`，`args` 第一项 `"-y"`，第二项 `"@fangjunjie/ssh-mcp-server"`
+- http：客户端片段使用 `url`；有令牌时加上 `headers.Authorization`。另外单独给出启动进程的命令，令牌放在环境变量 `SSH_MCP_HTTP_TOKEN` 中
 - **每个命令行参数与值必须是 args 数组中独立的两个元素**，绝不能写成 `"--host 192.168.1.1"`
-- 多连接场景：把每个连接写入 `ssh-config.json`（数组或对象格式皆可），客户端配置里只放 `--config-file <绝对路径>`
+- 多连接场景：把每个连接写入 `ssh-config.json`（数组或对象格式皆可）。stdio 的客户端配置里放 `--config-file <绝对路径>`；http 则把该参数放进单独的启动命令
 
 ### Step 7：合并写入配置
 - 先用 Read 读取目标 JSON 配置文件
@@ -119,6 +124,7 @@ digraph ssh_mcp_helper {
 | 命令黑名单 | `--blacklist "^rm .*,^shutdown.*"` |
 | 命令模板 | `--command-template "su root -c '<command>'"` |
 | 路径白名单 | `--allowed-local-paths` / `--allowed-remote-paths` |
+| HTTP 接入 | `--mcp-transport http`，客户端改用 `url`；令牌用 `SSH_MCP_HTTP_TOKEN` |
 
 ## 常见坑
 
@@ -151,6 +157,23 @@ digraph ssh_mcp_helper {
   }
 }
 ```
+
+HTTP 接入时，进程单独启动，客户端只保存 URL：
+
+```json
+{
+  "mcpServers": {
+    "ssh-mcp-server": {
+      "url": "http://127.0.0.1:3000/mcp",
+      "headers": {
+        "Authorization": "Bearer replace-with-a-long-random-token"
+      }
+    }
+  }
+}
+```
+
+对应启动命令在参数中加上 `--mcp-transport http`，令牌通过 `SSH_MCP_HTTP_TOKEN` 传入。
 
 多连接场景产出 `ssh-config.json` + 简化的客户端配置：
 

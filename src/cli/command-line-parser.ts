@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import { SSHConfig, SshConnectionConfigMap, ParsedArgs } from "../models/types.js";
+import { SSHConfig, SshConnectionConfigMap, ParsedArgs, McpTransport } from "../models/types.js";
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -46,6 +46,71 @@ export class CommandLineParser {
     throw new Error(
       `transportMode must be either 'exec' or 'shell', got: ${String(value)}`,
     );
+  }
+
+  private static parseMcpTransport(value: unknown): McpTransport {
+    if (value === undefined || value === null || value === "") {
+      return "stdio";
+    }
+
+    if (value === "stdio" || value === "http") {
+      return value;
+    }
+
+    throw new Error(
+      `mcp transport must be either 'stdio' or 'http', got: ${String(value)}`,
+    );
+  }
+
+  private static parseHttpHost(value: unknown): string {
+    if (value === undefined || value === null || value === "") {
+      return "127.0.0.1";
+    }
+
+    const host = String(value).trim();
+    if (!host || host.includes("://") || /[\s/]/.test(host)) {
+      throw new Error(
+        `http host must be a hostname or IP address, got: ${String(value)}`,
+      );
+    }
+
+    return host;
+  }
+
+  private static parseHttpPort(value: unknown): number {
+    if (value === undefined || value === null || value === "") {
+      return 3000;
+    }
+
+    const parsed = typeof value === "number" ? value : Number(String(value));
+    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65535) {
+      throw new Error(
+        `http port must be an integer between 0 and 65535, got: ${String(value)}`,
+      );
+    }
+
+    return parsed;
+  }
+
+  private static parseHttpPath(value: unknown): string {
+    if (value === undefined || value === null || value === "") {
+      return "/mcp";
+    }
+
+    const rawPath = String(value).trim();
+    if (!rawPath.startsWith("/") || rawPath.includes("?") || rawPath.includes("#") || /\s/.test(rawPath)) {
+      throw new Error(
+        `http path must be an absolute path without a query or hash, got: ${String(value)}`,
+      );
+    }
+
+    return rawPath.replace(/\/+$/, "") || "/";
+  }
+
+  private static parseHttpToken(value: unknown): string | undefined {
+    const fromCli = value === undefined || value === null ? "" : String(value).trim();
+    const token = fromCli || (process.env.SSH_MCP_HTTP_TOKEN || "").trim();
+    return token || undefined;
   }
 
   private static parseTimeout(
@@ -112,6 +177,11 @@ export class CommandLineParser {
         pty: { type: "string" },
         "try-keyboard": { type: "boolean" },
         "pre-connect": { type: "boolean" },
+        "mcp-transport": { type: "string" },
+        "http-host": { type: "string" },
+        "http-port": { type: "string" },
+        "http-path": { type: "string" },
+        "http-token": { type: "string" },
       },
       allowPositionals: true,
     });
@@ -428,6 +498,13 @@ export class CommandLineParser {
     return {
       configs: configMap,
       preConnect: values["pre-connect"] === true,
+      mcpTransport: this.parseMcpTransport(values["mcp-transport"]),
+      http: {
+        host: this.parseHttpHost(values["http-host"]),
+        port: this.parseHttpPort(values["http-port"]),
+        path: this.parseHttpPath(values["http-path"]),
+        token: this.parseHttpToken(values["http-token"]),
+      },
     };
   }
 

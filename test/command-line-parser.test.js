@@ -838,4 +838,85 @@ Host hostb
       assert.strictEqual(result.configs.test.host, '1.1.1.1');
     });
   });
+
+  describe('MCP HTTP 传输参数', () => {
+    const sshArgs = ['--host', '1.2.3.4', '--port', '22', '--username', 'user', '--password', 'pass'];
+
+    it('默认使用 stdio，并给出本机 HTTP 监听默认值', () => {
+      process.argv = ['node', 'test', ...sshArgs];
+      const result = CommandLineParser.parseArgs();
+
+      assert.strictEqual(result.mcpTransport, 'stdio');
+      assert.strictEqual(result.http.host, '127.0.0.1');
+      assert.strictEqual(result.http.port, 3000);
+      assert.strictEqual(result.http.path, '/mcp');
+      assert.strictEqual(result.http.token, process.env.SSH_MCP_HTTP_TOKEN || undefined);
+    });
+
+    it('应该解析 HTTP 监听参数', () => {
+      process.argv = [
+        'node', 'test', ...sshArgs,
+        '--mcp-transport', 'http',
+        '--http-host', '0.0.0.0',
+        '--http-port', '0',
+        '--http-path', '/ssh/',
+        '--http-token', 'cli-token',
+      ];
+      const result = CommandLineParser.parseArgs();
+
+      assert.strictEqual(result.mcpTransport, 'http');
+      assert.deepStrictEqual(result.http, {
+        host: '0.0.0.0',
+        port: 0,
+        path: '/ssh',
+        token: 'cli-token',
+      });
+    });
+
+    it('命令行令牌应覆盖 SSH_MCP_HTTP_TOKEN', () => {
+      const previous = process.env.SSH_MCP_HTTP_TOKEN;
+      process.env.SSH_MCP_HTTP_TOKEN = 'env-token';
+      try {
+        process.argv = ['node', 'test', ...sshArgs, '--http-token', 'cli-token'];
+        const result = CommandLineParser.parseArgs();
+        assert.strictEqual(result.http.token, 'cli-token');
+      } finally {
+        if (previous === undefined) {
+          delete process.env.SSH_MCP_HTTP_TOKEN;
+        } else {
+          process.env.SSH_MCP_HTTP_TOKEN = previous;
+        }
+      }
+    });
+
+    it('未提供命令行令牌时应读取 SSH_MCP_HTTP_TOKEN', () => {
+      const previous = process.env.SSH_MCP_HTTP_TOKEN;
+      process.env.SSH_MCP_HTTP_TOKEN = 'env-token';
+      try {
+        process.argv = ['node', 'test', ...sshArgs];
+        const result = CommandLineParser.parseArgs();
+        assert.strictEqual(result.http.token, 'env-token');
+      } finally {
+        if (previous === undefined) {
+          delete process.env.SSH_MCP_HTTP_TOKEN;
+        } else {
+          process.env.SSH_MCP_HTTP_TOKEN = previous;
+        }
+      }
+    });
+
+    it('非法传输、端口和路径应抛出错误', () => {
+      process.argv = ['node', 'test', ...sshArgs, '--mcp-transport', 'sse'];
+      assert.throws(() => CommandLineParser.parseArgs(), /stdio/);
+
+      process.argv = ['node', 'test', ...sshArgs, '--http-port', '70000'];
+      assert.throws(() => CommandLineParser.parseArgs(), /65535/);
+
+      process.argv = ['node', 'test', ...sshArgs, '--http-path', 'mcp'];
+      assert.throws(() => CommandLineParser.parseArgs(), /absolute path/);
+
+      process.argv = ['node', 'test', ...sshArgs, '--http-host', 'http://127.0.0.1'];
+      assert.throws(() => CommandLineParser.parseArgs(), /hostname or IP/);
+    });
+  });
 });

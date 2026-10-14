@@ -28,6 +28,7 @@ ssh-mcp-server is a bridging tool that enables AI assistants and other applicati
 - **🛡️ Command Security Control**: Precisely control the range of allowed commands through flexible blacklist and whitelist mechanisms to prevent dangerous operations
 - **🔄 Standardized Interface**: Complies with MCP protocol specifications for seamless integration with AI assistants supporting the protocol
 - **🚇 Dual Transport Modes**: Supports both `exec` and `shell` transport modes for direct SSH hosts and bastion or jump-host scenarios
+- **🌐 HTTP Access**: Uses stdio by default; `--mcp-transport http` serves the MCP endpoint over Streamable HTTP
 - **📂 File Transfer**: Supports bidirectional file transfers, uploading local files to servers or downloading files from servers
 - **🔑 Credential Isolation**: SSH credentials are managed entirely locally and never exposed to AI models, enhancing security
 - **🚀 Ready to Use**: Can be run directly using NPX without global installation, making it convenient and quick to deploy
@@ -624,6 +625,41 @@ Example response:
 ]
 ```
 
+### 🌐 HTTP Transport (Streamable HTTP)
+
+The process uses stdio by default, so existing `command` / `args` client configs keep working. To let a client connect by URL, start the same process with `--mcp-transport http`. It then serves MCP Streamable HTTP, by default at `http://127.0.0.1:3000/mcp`.
+
+Start the server locally. Keep the token in an environment variable so it does not show up in the process list:
+
+```bash
+export SSH_MCP_HTTP_TOKEN='replace-with-a-long-random-token'
+npx -y @fangjunjie/ssh-mcp-server \
+  --mcp-transport http \
+  --http-host 127.0.0.1 \
+  --http-port 3000 \
+  --host 192.168.1.1 \
+  --port 22 \
+  --username root \
+  --privateKey ~/.ssh/id_rsa
+```
+
+Point the MCP client at that URL:
+
+```json
+{
+  "mcpServers": {
+    "ssh-mcp-server": {
+      "url": "http://127.0.0.1:3000/mcp",
+      "headers": {
+        "Authorization": "Bearer replace-with-a-long-random-token"
+      }
+    }
+  }
+}
+```
+
+When both `--http-token` and `SSH_MCP_HTTP_TOKEN` are set, the command-line value wins. Without a token, bind to `127.0.0.1` only. Listening on `0.0.0.0` or any other non-local address lets every client that can reach the port run remote commands; the process prints a warning at startup.
+
 ### ⚙️ Command Line Options Reference
 
 ```text
@@ -650,6 +686,11 @@ Options:
   --command-template  Command template, use <quotedCommand> for shell arguments or <command> for raw insertion
   --pty               Allocate pseudo-tty for command execution (default: true)
   --pre-connect       Pre-connect to all configured SSH servers on startup
+  --mcp-transport     MCP client transport: stdio or http (default: stdio)
+  --http-host         HTTP bind address (default: 127.0.0.1)
+  --http-port         HTTP listen port (default: 3000; 0 lets the OS assign one)
+  --http-path         HTTP endpoint path (default: /mcp)
+  --http-token        HTTP bearer token; falls back to the SSH_MCP_HTTP_TOKEN environment variable
   --version, -v       Print package version
   --help              Print this help message
 ```
@@ -660,6 +701,7 @@ This server provides powerful capabilities to execute commands and transfer file
 
 - **Command Whitelisting**: It is *strongly recommended* to use the `--whitelist` option to restrict the set of commands that can be executed. Without a whitelist, any command can be executed on the remote server, which can be a significant security risk.
 - **Private Key Security**: The server reads the SSH private key into memory. Ensure that the machine running the `ssh-mcp-server` is secure. Do not expose the server to untrusted networks.
+- **HTTP Endpoint**: HTTP mode binds to `127.0.0.1` by default. Set `--http-token` or `SSH_MCP_HTTP_TOKEN` before listening on another interface. The token is the key to remote command execution; use a long random value and prefer the environment variable.
 - **Denial of Service (DoS)**: The server does not have built-in rate limiting. An attacker could potentially launch a DoS attack by flooding the server with connection requests or large file transfers. It is recommended to run the server behind a firewall or reverse proxy with rate-limiting capabilities.
 - **Path Traversal**: The server has built-in protection against path traversal attacks on the local filesystem. However, it is still important to be mindful of the paths used in `upload` and `download` commands.
 - **Local Transfer Scope**: By default, local file transfers are restricted to the current working directory. Use `--allowed-local-paths` or `allowedLocalPaths` in config only for explicitly trusted directories.

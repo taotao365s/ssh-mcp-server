@@ -92,9 +92,26 @@ export interface ServerStatus {
 }
 
 /**
+ * MCP client transport. stdio is the historical default; http serves Streamable HTTP.
+ */
+export type McpTransport = "stdio" | "http";
+
+/**
+ * Streamable HTTP listen configuration
+ */
+export interface HttpListenConfig {
+  host: string;
+  port: number;
+  path: string;
+  token?: string;
+}
+
+/**
  * Parsed command line arguments result
  */
 export interface ParsedArgs {
   configs: SshConnectionConfigMap;
   preConnect: boolean;
+  mcpTransport: McpTransport;
+  http: HttpListenConfig;
 }

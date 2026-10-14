@@ -5,27 +5,27 @@ import { CommandLineParser } from "../cli/command-line-parser.js";
 import { Logger } from "../utils/logger.js";
 import { registerAllTools } from "../tools/index.js";
 import { SERVER_CONFIG } from "../config/server.js";
+import { isLoopbackHost, McpHttpServer } from "./http-server.js";
+import type { ParsedArgs } from "../models/types.js";
 
 /**
  * MCP Server class
  */
 export class SshMcpServer {
-  private server: McpServer;
+  private server?: McpServer;
+  private httpServer?: McpHttpServer;
   private sshManager: SSHConnectionManager;
   private shutdownHandlersRegistered = false;
   private shutdownPromise?: Promise<void>;
 
   constructor() {
-    this.server = new McpServer(SERVER_CONFIG);
-
     this.sshManager = SSHConnectionManager.getInstance();
   }
 
-  /**
-   * Register tools
-   */
-  private registerTools(): void {
-    registerAllTools(this.server);
+  private createMcpServer(): McpServer {
+    const server = new McpServer(SERVER_CONFIG);
+    registerAllTools(server);
+    return server;
   }
 
   private async shutdown(reason: string, exitCode?: number): Promise<void> {
@@ -33,7 +33,20 @@ export class SshMcpServer {
       this.shutdownPromise = (async () => {
         Logger.log(`Received ${reason}, shutting down SSH MCP server...`, "info");
 
+        try {
+          await this.httpServer?.close();
+        } catch (error) {
+          Logger.log(
+            `Failed to close HTTP server cleanly: ${(error as Error).message}`,
+            "error",
+          );
+        }
+
         this.sshManager.disconnect();
+
+        if (!this.server) {
+          return;
+        }
 
         try {
           await this.server.close();
@@ -53,7 +66,7 @@ export class SshMcpServer {
     }
   }
 
-  private registerShutdownHandlers(): void {
+  private registerShutdownHandlers(transport: ParsedArgs["mcpTransport"]): void {
     if (this.shutdownHandlersRegistered) {
       return;
     }
@@ -64,32 +77,19 @@ export class SshMcpServer {
 
     process.once("SIGINT", handleSignal);
     process.once("SIGTERM", handleSignal);
-    process.stdin.resume();
-    process.stdin.once("end", () => void this.shutdown("stdin end", 0));
-    process.stdin.once("close", () => void this.shutdown("stdin close", 0));
+
+    // stdio clients own the process lifetime through stdin. An HTTP server must
+    // keep running after the launching shell closes its end of the pipe.
+    if (transport === "stdio") {
+      process.stdin.resume();
+      process.stdin.once("end", () => void this.shutdown("stdin end", 0));
+      process.stdin.once("close", () => void this.shutdown("stdin close", 0));
+    }
 
     this.shutdownHandlersRegistered = true;
   }
 
-  /**
-   * Run the server
-   */
-  public async run(): Promise<void> {
-    // Initialize SSH configuration
-    const parsedArgs = CommandLineParser.parseArgs();
-    this.sshManager.setConfig(parsedArgs.configs);
-    this.registerShutdownHandlers();
-
-    // Register tools before accepting MCP requests.
-    this.registerTools();
-
-    // Create transport instance and connect.
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
-
-    Logger.log("MCP server connection established");
-
-    // Security warning
+  private logSecurityWarnings(parsedArgs: ParsedArgs): void {
     const allConfigs = Object.values(parsedArgs.configs);
     if (
       allConfigs.some(
@@ -113,6 +113,48 @@ export class SshMcpServer {
         "info"
       );
     }
+
+    if (parsedArgs.mcpTransport !== "http") {
+      return;
+    }
+
+    if (!isLoopbackHost(parsedArgs.http.host)) {
+      const exposure = parsedArgs.http.token
+        ? "Requests without the bearer token are rejected."
+        : "Any client that can reach this port can execute remote SSH commands.";
+      Logger.log(
+        `WARNING: HTTP transport is listening on ${parsedArgs.http.host}, which is not a loopback address. ${exposure}`,
+        "info",
+      );
+    }
+    if (!parsedArgs.http.token) {
+      Logger.log(
+        "WARNING: HTTP transport has no bearer token. Set --http-token or SSH_MCP_HTTP_TOKEN so other local processes cannot call the endpoint anonymously.",
+        "info",
+      );
+    }
+  }
+
+  /**
+   * Run the server
+   */
+  public async run(): Promise<void> {
+    const parsedArgs = CommandLineParser.parseArgs();
+    this.sshManager.setConfig(parsedArgs.configs);
+    this.registerShutdownHandlers(parsedArgs.mcpTransport);
+
+    if (parsedArgs.mcpTransport === "http") {
+      this.httpServer = new McpHttpServer(parsedArgs.http, () => this.createMcpServer());
+      const endpoint = await this.httpServer.listen();
+      Logger.log(`MCP HTTP server listening on ${endpoint}`);
+    } else {
+      this.server = this.createMcpServer();
+      const transport = new StdioServerTransport();
+      await this.server.connect(transport);
+      Logger.log("MCP server connection established");
+    }
+
+    this.logSecurityWarnings(parsedArgs);
 
     // Pre-connect to all servers if flag is set
     if (parsedArgs.preConnect) {

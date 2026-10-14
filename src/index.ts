@@ -29,6 +29,11 @@ Options:
   --pty <true|false>              Allocate pseudo-tty for exec mode commands (default: true)
   --try-keyboard                  Enable keyboard-interactive authentication
   --pre-connect                   Pre-connect to all SSH servers on startup
+  --mcp-transport <stdio|http>    MCP client transport (default: stdio)
+  --http-host <host>              Bind address for HTTP transport (default: 127.0.0.1)
+  --http-port <port>              Listen port for HTTP transport (default: 3000)
+  --http-path <path>              Endpoint path for HTTP transport (default: /mcp)
+  --http-token <token>            Bearer token for HTTP; falls back to SSH_MCP_HTTP_TOKEN
   --version, -v                   Print package version
   --help                          Print this help message`;
 

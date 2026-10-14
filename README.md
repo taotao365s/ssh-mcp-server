@@ -32,6 +32,7 @@ ssh-mcp-server 是一个桥接工具，可以让 AI 助手等支持 MCP 协议�
 - **🛡️ 命令安全控制**：通过灵活的黑白名单机制，精确控制允许执行的命令范围，防止危险操作
 - **🔄 标准化接口**：符合 MCP 协议规范，与支持该协议的 AI 助手无缝集成
 - **🚇 双传输模式**：同时支持 `exec` 和 `shell` 两种 transport，兼容直连主机与堡垒机或跳板机场景
+- **🌐 HTTP 接入**：默认使用 stdio；加上 `--mcp-transport http` 后通过 Streamable HTTP 提供 MCP 端点
 - **📂 文件传输**：支持双向文件传输功能，可上传本地文件到服务器或从服务器下载文件
 - **🔑 凭据隔离**：SSH 凭据完全在本地管理，不会暴露给 AI 模型，增强安全性
 - **🚀 即用即走**：使用 NPX 可直接运行，无需全局安装，方便快捷
@@ -630,6 +631,41 @@ npx @fangjunjie/ssh-mcp-server \
 ]
 ```
 
+### 🌐 HTTP 传输（Streamable HTTP）
+
+进程默认使用 stdio，现有 `command` / `args` 配置保持可用。需要客户端通过 URL 连接时，用 `--mcp-transport http` 把同一进程跑成 MCP Streamable HTTP 服务，端点默认是 `http://127.0.0.1:3000/mcp`。
+
+先在本机启动服务。令牌放在环境变量里，避免出现在进程参数中：
+
+```bash
+export SSH_MCP_HTTP_TOKEN='replace-with-a-long-random-token'
+npx -y @fangjunjie/ssh-mcp-server \
+  --mcp-transport http \
+  --http-host 127.0.0.1 \
+  --http-port 3000 \
+  --host 192.168.1.1 \
+  --port 22 \
+  --username root \
+  --privateKey ~/.ssh/id_rsa
+```
+
+MCP 客户端配置 URL：
+
+```json
+{
+  "mcpServers": {
+    "ssh-mcp-server": {
+      "url": "http://127.0.0.1:3000/mcp",
+      "headers": {
+        "Authorization": "Bearer replace-with-a-long-random-token"
+      }
+    }
+  }
+}
+```
+
+`--http-token` 与 `SSH_MCP_HTTP_TOKEN` 同时设置时，以命令行参数为准。未设置令牌时只建议绑定 `127.0.0.1`。监听 `0.0.0.0` 或其他非本机地址时，任何能访问该端口的客户端都可以执行远程命令，启动日志会给出警告。
+
 ### ⚙️ 命令行选项参考
 
 ```text
@@ -656,6 +692,11 @@ npx @fangjunjie/ssh-mcp-server \
   --command-template  命令模板；shell 参数用 <quotedCommand>，原样插入用 <command>
   --pty <true|false>  为命令执行分配伪终端（默认: true）
   --pre-connect       启动时预连接所有配置的 SSH 服务器
+  --mcp-transport     MCP 客户端传输：stdio 或 http（默认: stdio）
+  --http-host         HTTP 监听地址（默认: 127.0.0.1）
+  --http-port         HTTP 监听端口（默认: 3000，0 表示由系统分配）
+  --http-path         HTTP 端点路径（默认: /mcp）
+  --http-token        HTTP Bearer 令牌；未传时读取环境变量 SSH_MCP_HTTP_TOKEN
   --version, -v       打印包版本
   --help              打印帮助信息
 ```
@@ -666,6 +707,7 @@ npx @fangjunjie/ssh-mcp-server \
 
 - **命令白名单**：*强烈建议* 使用 `--whitelist` 选项来限制可执行的命令集合。如果没有白名单，任何命令都可以在远程服务器上执行，这可能带来重大的安全风险。
 - **私钥安全**：服务器会将 SSH 私钥读入内存。请确保运行 `ssh-mcp-server` 的机器是安全的。不要将服务器暴露给不受信任的网络。
+- **HTTP 端点**：HTTP 模式默认只监听 `127.0.0.1`。对外网卡监听时请配置 `--http-token` 或 `SSH_MCP_HTTP_TOKEN`。令牌相当于远程命令执行的钥匙，使用长随机字符串，并优先放在环境变量中。
 - **拒绝服务攻击 (DoS)**：服务器没有内置的速率限制。攻击者可能通过向服务器发送大量连接请求或大文件传输来发起 DoS 攻击。建议在具有速率限制功能的防火墙或反向代理后面运行服务器。
 - **路径遍历**：服务器内置了对本地文件系统路径遍历攻击的保护。但是，仍然需要注意在 `upload` 和 `download` 命令中使用的路径。
 - **本地传输范围**：默认仅允许访问当前工作目录。只有在明确可信时，才建议通过 `--allowed-local-paths` 或配置文件中的 `allowedLocalPaths` 放宽范围。

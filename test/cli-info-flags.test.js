@@ -37,6 +37,11 @@ const expectedHelpOptions = [
   '--pty',
   '--try-keyboard',
   '--pre-connect',
+  '--mcp-transport <stdio|http>',
+  '--http-host <host>',
+  '--http-port <port>',
+  '--http-path <path>',
+  '--http-token <token>',
   '--version, -v',
   '--help',
 ];
